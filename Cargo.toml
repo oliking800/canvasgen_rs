@@ -1,0 +1,40 @@
+[package]
+name = "canvasgen"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Deterministic, plausible browser canvas fingerprint images (2D and WebGL probes) with full-colour emoji text rendering"
+license = "MIT"
+readme = "README.md"
+keywords = ["canvas", "fingerprint", "emoji", "captcha", "png"]
+categories = ["graphics", "multimedia::images"]
+exclude = ["/target", "/.github", "/captures", "/tests/fixtures"]
+autobenches = false
+
+[lib]
+name = "canvasgen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "canvasgen"
+path = "src/bin/canvasgen.rs"
+
+[dependencies]
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+fontdb = "0.24"
+png = "0.17"
+rand = "0.8"
+rand_chacha = "0.3"
+rustybuzz = "0.20"
+skrifa = "0.44"
+swash = "0.2"
+tiny-skia = "0.12"
+
+[dev-dependencies]
+base64 = "0.22"
+font-test-data = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
