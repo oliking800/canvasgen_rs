@@ -13,33 +13,45 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// Allocate a transparent canvas. Degenerate/oversized dimensions are
+    /// clamped to `1..=4096` per axis; allocation failure falls back to 1x1.
     pub fn new(width: u32, height: u32) -> Self {
-        let pixmap = Pixmap::new(width.max(1), height.max(1)).expect("non-zero canvas");
+        let w = width.clamp(1, crate::profile::MAX_CANVAS_DIM);
+        let h = height.clamp(1, crate::profile::MAX_CANVAS_DIM);
+        let pixmap = Pixmap::new(w, h)
+            .or_else(|| Pixmap::new(1, 1))
+            .expect("1x1 pixmap");
         Self { pixmap }
     }
 
+    /// Allocate and fill a canvas with `color`.
     pub fn filled(width: u32, height: u32, color: [u8; 4]) -> Self {
         let mut c = Self::new(width, height);
         c.clear(color);
         c
     }
 
+    /// Raster width in pixels.
     pub fn width(&self) -> u32 {
         self.pixmap.width()
     }
 
+    /// Raster height in pixels.
     pub fn height(&self) -> u32 {
         self.pixmap.height()
     }
 
+    /// Borrow the underlying tiny-skia pixmap.
     pub fn pixmap(&self) -> &Pixmap {
         &self.pixmap
     }
 
+    /// Mutably borrow the underlying tiny-skia pixmap.
     pub fn pixmap_mut(&mut self) -> &mut Pixmap {
         &mut self.pixmap
     }
 
+    /// Replace every pixel with `color` (straight alpha).
     pub fn clear(&mut self, color: [u8; 4]) {
         self.pixmap
             .fill(Color::from_rgba8(color[0], color[1], color[2], color[3]));
@@ -55,6 +67,7 @@ impl Canvas {
         out
     }
 
+    /// Fill an axis-aligned rectangle with a straight-alpha colour.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [u8; 4]) {
         let Some(rect) = Rect::from_xywh(x, y, w, h) else {
             return;
@@ -65,6 +78,7 @@ impl Canvas {
             .fill_rect(rect, &paint, Transform::identity(), None);
     }
 
+    /// Fill a path with a straight-alpha colour.
     pub fn fill_path(&mut self, path: &Path, color: [u8; 4]) {
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
@@ -72,6 +86,7 @@ impl Canvas {
             .fill_path(path, &paint, FillRule::Winding, Transform::identity(), None);
     }
 
+    /// Fill a path with a custom paint, transform and optional clip mask.
     pub fn fill_path_with(
         &mut self,
         path: &Path,
@@ -83,6 +98,7 @@ impl Canvas {
             .fill_path(path, paint, FillRule::Winding, transform, mask);
     }
 
+    /// Stroke a path with a straight-alpha colour.
     pub fn stroke_path(&mut self, path: &Path, color: [u8; 4], width: f32) {
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
@@ -95,6 +111,7 @@ impl Canvas {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Stroke a path with a transform and optional clip mask.
     pub fn stroke_path_with(
         &mut self,
         path: &Path,
@@ -114,6 +131,7 @@ impl Canvas {
     }
 
     /// Source-over blend of one straight-alpha pixel into the canvas.
+    /// Source-over a single straight-alpha pixel at `(x, y)`.
     pub fn blend_pixel(&mut self, x: i32, y: i32, rgba: [u8; 4]) {
         let (w, h) = (self.width() as i32, self.height() as i32);
         if x < 0 || y < 0 || x >= w || y >= h || rgba[3] == 0 {
@@ -126,6 +144,7 @@ impl Canvas {
     }
 
     /// Source-over blend of a straight-alpha RGBA image at `(x, y)`.
+    /// Source-over a straight-alpha RGBA image at `(x, y)`.
     pub fn blend_image(&mut self, x: i32, y: i32, w: u32, h: u32, rgba: &[u8]) {
         if w == 0 || h == 0 || rgba.len() < (w as usize * h as usize * 4) {
             return;

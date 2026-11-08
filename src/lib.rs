@@ -38,7 +38,31 @@ pub use probes::{
     gradient_triangle, render_probe, small_probe, small_probe_with, SmallKind, CANVAS_CTXS_JSON,
     DEFAULT_EMOJI_ROW, FINGERPRINT_PROBES,
 };
-pub use profile::{CanvasProfile, GeneratedCanvas, ProbeKind};
+pub use profile::{CanvasProfile, GeneratedCanvas, ProbeKind, MAX_CANVAS_DIM};
+
+/// Fallible [`render_probe`]: rejects zero/oversized dimensions, invalid DPR
+/// and invalid font bytes instead of clamping/falling back.
+pub fn try_render_probe(
+    kind: ProbeKind,
+    profile: &CanvasProfile,
+) -> Result<GeneratedCanvas, String> {
+    profile.validate()?;
+    Ok(render_probe(kind, profile))
+}
+
+/// Fallible [`fingerprint_set`].
+pub fn try_fingerprint_set(profile: &CanvasProfile) -> Result<Vec<GeneratedCanvas>, String> {
+    profile.validate()?;
+    Ok(fingerprint_set(profile))
+}
+
+/// Fallible [`canvas_data_urls`].
+pub fn try_canvas_data_urls(profile: &CanvasProfile) -> Result<Vec<String>, String> {
+    Ok(try_fingerprint_set(profile)?
+        .into_iter()
+        .map(|c| c.data_url)
+        .collect())
+}
 
 /// Package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

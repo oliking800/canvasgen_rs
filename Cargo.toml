@@ -6,6 +6,7 @@ rust-version = "1.85"
 description = "Deterministic, plausible browser canvas fingerprint images (2D and WebGL probes) with full-colour emoji text rendering"
 license = "MIT"
 readme = "README.md"
+documentation = "https://docs.rs/canvasgen"
 keywords = ["canvas", "fingerprint", "emoji", "captcha", "png"]
 categories = ["graphics", "multimedia::images"]
 exclude = ["/target", "/.github", "/captures", "/tests/fixtures"]

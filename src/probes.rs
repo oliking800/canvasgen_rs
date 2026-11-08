@@ -110,10 +110,11 @@ pub const CANVAS_CTXS_JSON: &str = concat!(
 // 1. Text / emoji row
 // ---------------------------------------------------------------------------
 
-/// 2D text probe: the captured emoji row on white, using the canvas default
-/// `10px` font, baseline 70, x=50.
+/// 2D text probe: the captured emoji row, using the canvas default `10px`
+/// font, baseline 70, x=50. The captured canvas is transparent, so the default
+/// background is transparent too; set `profile.background` for white.
 pub fn emoji_text(profile: &CanvasProfile) -> GeneratedCanvas {
-    let background = profile.background.unwrap_or([255, 255, 255, 255]);
+    let background = profile.background.unwrap_or([0, 0, 0, 0]);
     let emoji_profile = EmojiProfile {
         font_size: 10.0,
         dpr: profile.dpr,
@@ -154,7 +155,7 @@ pub fn emoji_row(
 /// Exposed for tests / callers that explicitly want the vector fallback.
 pub fn emoji_text_fallback(profile: &CanvasProfile) -> GeneratedCanvas {
     let (w, h) = profile.pixel_size();
-    let mut canvas = Canvas::filled(w, h, profile.background.unwrap_or([255, 255, 255, 255]));
+    let mut canvas = Canvas::filled(w, h, profile.background.unwrap_or([0, 0, 0, 0]));
     let ep = EmojiProfile {
         font_size: 10.0,
         dpr: profile.dpr,
@@ -182,9 +183,9 @@ pub fn gradient_triangle(profile: &CanvasProfile) -> GeneratedCanvas {
     let mut rng = rng_for(profile.seed, 0x7A11);
     let jitter_x = rng.gen_range(-0.012f32..0.012) * w as f32;
     let jitter_y = rng.gen_range(-0.010f32..0.010) * h as f32;
-    let apex = (w as f32 * 0.50 + jitter_x, h as f32 * 0.245 + jitter_y);
-    let left = (w as f32 * 0.050, h as f32 * 0.855);
-    let right = (w as f32 * 0.950, h as f32 * 0.855);
+    let apex = (w as f32 * 0.50 + jitter_x, h as f32 * 0.242 + jitter_y);
+    let left = (w as f32 * 0.050, h as f32 * 0.848);
+    let right = (w as f32 * 0.898, h as f32 * 0.848);
 
     let edge = |a: (f32, f32), b: (f32, f32), p: (f32, f32)| {
         (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)

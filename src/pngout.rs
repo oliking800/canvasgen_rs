@@ -22,7 +22,7 @@ pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Stri
         enc.set_color(png::ColorType::Rgba);
         enc.set_depth(png::BitDepth::Eight);
         enc.set_compression(png::Compression::Default);
-        enc.set_filter(png::FilterType::NoFilter);
+        enc.set_filter(png::FilterType::Paeth);
         let mut writer = enc.write_header().map_err(|e| format!("png header: {e}"))?;
         writer
             .write_image_data(&rgba[..expected])

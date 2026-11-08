@@ -356,18 +356,67 @@ fn flag_font_capability() {
 }
 
 #[test]
+fn zero_size_and_empty_text_do_not_panic() {
+    let mut p = CanvasProfile::new(1).with_size(0, 0);
+    let canvas = render_probe(ProbeKind::Small, &p);
+    assert_eq!((canvas.width, canvas.height), (1, 1));
+    assert!(!canvas.png.is_empty());
+
+    p = CanvasProfile::new(1).with_size(300, 150);
+    let empty = canvasgen::emoji_row(&p, "", &EmojiProfile::default(), [255, 255, 255, 255], 10.0);
+    let (w, h, rgba) = decode_png(&empty.png);
+    assert_eq!((w, h), (300, 150));
+    assert!(rgba.chunks_exact(4).all(|px| px == [255, 255, 255, 255]));
+}
+
+#[test]
+fn bad_font_falls_back_and_try_api_errors() {
+    let mut p = CanvasProfile::new(1);
+    p.font = Some(vec![0, 1, 2, 3, 4, 5]);
+    // Infallible API falls back to vector shapes.
+    let canvas = emoji_text(&p);
+    assert!(!canvas.png.is_empty());
+    // Fallible API reports the invalid font.
+    assert!(canvasgen::try_render_probe(ProbeKind::Text, &p).is_err());
+
+    assert!(
+        canvasgen::try_render_probe(ProbeKind::Text, &CanvasProfile::new(1).with_size(0, 100))
+            .is_err()
+    );
+
+    let mut nan = CanvasProfile::new(1);
+    nan.dpr = f32::NAN;
+    assert!(nan.validate().is_err());
+
+    assert!(canvasgen::try_render_probe(
+        ProbeKind::Abstract,
+        &CanvasProfile::new(1).with_size(5000, 10)
+    )
+    .is_err());
+}
+
+#[test]
+fn try_from_rgba_validates_buffer() {
+    assert!(GeneratedCanvas::try_from_rgba(ProbeKind::Small, 2, 2, vec![0; 8]).is_err());
+    assert!(GeneratedCanvas::try_from_rgba(ProbeKind::Small, 0, 2, Vec::new()).is_err());
+    let ok = GeneratedCanvas::try_from_rgba(ProbeKind::Small, 2, 2, vec![0; 16]).unwrap();
+    assert_eq!((ok.width, ok.height), (2, 2));
+}
+
+#[test]
 fn write_samples() {
     let dir = samples_dir();
     let profile = CanvasProfile::new(42);
 
-    // Headline: the captured emoji row, rendered with swash.
-    let row = emoji_text(&profile);
+    // Headline: the captured emoji row, rendered with swash on white for
+    // visual comparison (the probe itself stays transparent by default).
+    let mut white = profile.clone();
+    white.background = Some([255, 255, 255, 255]);
+    let row = emoji_text(&white);
     std::fs::write(dir.join("emoji_row_swash.png"), &row.png).unwrap();
 
-    // Transparent variant for compositing checks.
-    let mut transparent = profile.clone();
-    transparent.background = Some([0, 0, 0, 0]);
-    let row_t = emoji_text(&transparent);
+    // Transparent variant — this is what the probe generates by default.
+    let row_t = emoji_text(&profile);
     std::fs::write(dir.join("emoji_row_transparent.png"), &row_t.png).unwrap();
 
     // ZWJ / skin tone / flag set at a readable size.
