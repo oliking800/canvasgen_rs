@@ -32,10 +32,12 @@ pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Stri
     Ok(out)
 }
 
+/// Wrap PNG bytes as `data:image/png;base64,...`.
 pub fn to_data_url(png: &[u8]) -> String {
     format!("data:image/png;base64,{}", STANDARD.encode(png))
 }
 
+/// Decode a PNG data URL back to bytes (round-trip helper for tests).
 pub fn decode_data_url(url: &str) -> Result<Vec<u8>, String> {
     let rest = url
         .strip_prefix("data:image/png;base64,")
