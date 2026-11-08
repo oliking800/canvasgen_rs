@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<body>
+<script>
+const REF = "__REF__";
+const W = 300, H = 150;
+const VS = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
+const FS = 'precision highp float;uniform vec2 u;void main(){gl_FragColor=vec4(2.0*gl_FragCoord.x/u.x,2.0*gl_FragCoord.y/u.y,1.0,1.0);}';
+
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+const gl = cv.getContext('webgl', {antialias:true, preserveDrawingBuffer:true});
+const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o;};
+const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);gl.useProgram(pr);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+gl.uniform2f(gl.getUniformLocation(pr,'u'),W,H);gl.viewport(0,0,W,H);
+const out = new Uint8Array(W*H*4);
+
+function render(vertsPx) {
+  const verts = new Float32Array(vertsPx.flatMap(([x,y])=>[2*x/W-1,1-2*y/H]));
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,verts,gl.STATIC_DRAW);
+  gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.readPixels(0,0,W,H,gl.RGBA,gl.UNSIGNED_BYTE,out);
+}
+
+const img = new Image();
+img.onload = () => {
+  const rc = document.createElement('canvas'); rc.width = W; rc.height = H;
+  const rx = rc.getContext('2d'); rx.drawImage(img, 0, 0);
+  const ref = rx.getImageData(0, 0, W, H).data;
+  const results = [];
+  for (const ax of [149.5, 150, 150.5])
+  for (const ay of [37, 37.5])
+  for (const lx of [14, 14.5, 15, 15.5])
+  for (const rxp of [268.5, 269, 269.5, 270])
+  for (const by of [127, 127.5]) {
+    render([[ax,ay],[lx,by],[rxp,by]]);
+    let diff = 0, sum = 0, max = 0;
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4;
+      const dst = y * W * 4;
+      for (let x = 0; x < W; x++) {
+        const i = src + x*4, j = dst + x*4;
+        const d = Math.max(Math.abs(out[i]-ref[j]), Math.abs(out[i+1]-ref[j+1]), Math.abs(out[i+2]-ref[j+2]));
+        if (d) { diff++; sum += d; if (d > max) max = d; }
+      }
+    }
+    results.push({ax, ay, lx, rx: rxp, by, diff, mean: sum/(W*H), max});
+  }
+  results.sort((a,b) => a.diff - b.diff || a.mean - b.mean);
+  document.body.setAttribute('data-out', JSON.stringify(results.slice(0, 12)));
+};
+img.src = REF;
+</script>

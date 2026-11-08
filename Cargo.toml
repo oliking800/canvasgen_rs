@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "canvasgen"
 version = "0.1.0"
 edition = "2021"
@@ -7,9 +7,21 @@ description = "Deterministic, plausible browser canvas fingerprint images (2D an
 license = "MIT"
 readme = "README.md"
 documentation = "https://docs.rs/canvasgen"
+repository = "https://github.com/oliking800/canvasgen_rs"
 keywords = ["canvas", "fingerprint", "emoji", "captcha", "png"]
 categories = ["graphics", "multimedia::images"]
-exclude = ["/target", "/.github", "/captures", "/tests/fixtures"]
+exclude = [
+    "/target",
+    "/.github",
+    "/captures",
+    "/samples",
+    "/spec",
+    "/tests/fixtures",
+    "/tools",
+    "/canvas_calls.json",
+    "/canvas_norm_*.json",
+    "/captures_devices",
+]
 autobenches = false
 
 [lib]
@@ -39,3 +51,4 @@ font-test-data = "0.10"
 [profile.release]
 opt-level = 3
 lto = "thin"
+

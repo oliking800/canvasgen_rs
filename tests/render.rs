@@ -7,8 +7,8 @@ use base64::Engine as _;
 
 use canvasgen::emoji::{self, EmojiProfile};
 use canvasgen::{
-    emoji_text, emoji_text_fallback, fingerprint_set, render_probe, CanvasProfile, GeneratedCanvas,
-    ProbeKind, DEFAULT_EMOJI_ROW,
+    emoji_text, emoji_text_fallback, fingerprint_set, render_probe, small_probe, CanvasProfile,
+    GeneratedCanvas, ProbeKind, DEFAULT_EMOJI_ROW,
 };
 
 fn samples_dir() -> PathBuf {
@@ -234,6 +234,207 @@ fn emoji_row_matches_captured_layout() {
     assert!((58..=62).contains(&bbox.1), "top edge {bbox:?}");
     assert!((96..=112).contains(&bbox.2), "right edge {bbox:?}");
     assert!((69..=74).contains(&bbox.3), "bottom edge {bbox:?}");
+}
+
+#[test]
+fn small_probe_matches_captured_program() {
+    let canvas = small_probe(&CanvasProfile::new(42).with_size(20, 20));
+    let (w, h, rgba) = decode_png(&canvas.png);
+    assert_eq!((w, h), (20, 20));
+    eprintln!("small probe colourful: {}", colourful_pixels(&rgba));
+    assert!(
+        colourful_pixels(&rgba) > 80,
+        "expected the 15px 😀 to render"
+    );
+    // The captured face ink sits at x 1..=18, y 1..=18.
+    let bbox = non_background_bbox(&rgba, w, h).expect("face pixels");
+    eprintln!("small probe bbox: {bbox:?}");
+    assert!(bbox.0 <= 3, "left edge {bbox:?}");
+    assert!(bbox.1 <= 3, "top edge {bbox:?}");
+    assert!((15..=19).contains(&bbox.2), "right edge {bbox:?}");
+    assert!((15..=19).contains(&bbox.3), "bottom edge {bbox:?}");
+}
+
+#[test]
+fn silicon_bias_matches_measured_gpu_signature() {
+    use canvasgen::{gradient_triangle_with, GpuClass, SiliconProfile};
+
+    let profile = CanvasProfile::new(7).with_size(300, 150);
+    let nvidia = gradient_triangle_with(&profile, SiliconProfile::for_gpu(GpuClass::Nvidia));
+    let same = gradient_triangle_with(&profile, SiliconProfile::for_gpu(GpuClass::Nvidia));
+    assert_eq!(nvidia.png, same.png, "same GPU class must be identical");
+
+    let apple = gradient_triangle_with(&profile, SiliconProfile::for_gpu(GpuClass::Apple));
+    let (_, _, a) = decode_png(&nvidia.png);
+    let (_, _, b) = decode_png(&apple.png);
+    let mut diff = 0usize;
+    let mut max = 0i32;
+    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        let d = (0..3)
+            .map(|c| (pa[c] as i32 - pb[c] as i32).abs())
+            .max()
+            .unwrap_or(0);
+        if d > 0 {
+            diff += 1;
+            max = max.max(d);
+        }
+    }
+    let frac = diff as f64 / (300.0 * 150.0);
+    eprintln!("apple vs nvidia: diff {diff} ({frac:.4}), max {max}");
+    // Real Apple-vs-NVIDIA pair: 3.89% of pixels, every delta exactly 1 LSB.
+    assert_eq!(max, 1, "GPU bias must only flip 1 LSB");
+    assert!(frac > 0.0 && frac < 0.10, "unexpected diff fraction {frac}");
+}
+
+#[test]
+fn text_style_matches_measured_engine_signature() {
+    use canvasgen::{emoji_text_with, small_probe_with_style, SmallKind, TextEngine, TextStyle};
+
+    fn diff_stats(a: &GeneratedCanvas, b: &GeneratedCanvas) -> (f64, f64, i32) {
+        let (_, _, pa) = decode_png(&a.png);
+        let (_, _, pb) = decode_png(&b.png);
+        let mut n = 0usize;
+        let mut sum = 0i64;
+        let mut max = 0i32;
+        for (x, y) in pa.chunks_exact(4).zip(pb.chunks_exact(4)) {
+            let d = (0..4)
+                .map(|c| (x[c] as i32 - y[c] as i32).abs())
+                .max()
+                .unwrap_or(0);
+            if d > 0 {
+                n += 1;
+                sum += d as i64;
+                max = max.max(d);
+            }
+        }
+        let total = (a.width * a.height) as f64;
+        (n as f64 / total, sum as f64 / total, max)
+    }
+
+    let p = CanvasProfile::new(11);
+    let row_skia = emoji_text_with(&p, TextStyle::for_engine(TextEngine::Skia));
+    let row_gecko = emoji_text_with(&p, TextStyle::for_engine(TextEngine::Gecko));
+    let (frac, mean, max) = diff_stats(&row_skia, &row_gecko);
+    eprintln!("row skia-vs-gecko: frac {frac:.4} mean {mean:.3} max {max}");
+    // Measured Chrome↔Firefox row: 0.84 % of pixels, mean 0.28, max 141.
+    assert!((0.004..0.020).contains(&frac), "row frac {frac}");
+    assert!((0.1..0.5).contains(&mean), "row mean {mean}");
+
+    let p20 = CanvasProfile::new(11).with_size(20, 20);
+    let face_skia = small_probe_with_style(
+        &p20,
+        SmallKind::Emoji,
+        TextStyle::for_engine(TextEngine::Skia),
+    );
+    let face_gecko = small_probe_with_style(
+        &p20,
+        SmallKind::Emoji,
+        TextStyle::for_engine(TextEngine::Gecko),
+    );
+    let (frac, mean, max) = diff_stats(&face_skia, &face_gecko);
+    eprintln!("face skia-vs-gecko: frac {frac:.4} mean {mean:.3} max {max}");
+    // Measured Chrome↔Firefox face: 38.5 % of pixels, mean 4.4, max 51.
+    assert!((0.30..0.50).contains(&frac), "face frac {frac}");
+    assert!((3.0..6.0).contains(&mean), "face mean {mean}");
+    assert!(max <= 64, "face max {max}");
+
+    // Same style is bit-identical.
+    let again = emoji_text_with(&p, TextStyle::for_engine(TextEngine::Gecko));
+    assert_eq!(row_gecko.png, again.png);
+
+    // Text style is class-level: the seed only selects an engine family.
+    let seeded = TextStyle::from_seed(123);
+    assert_eq!(seeded, TextStyle::for_engine(seeded.engine));
+}
+
+#[test]
+fn text_engine_from_user_agent() {
+    use canvasgen::TextEngine;
+    assert_eq!(
+        TextEngine::from_user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+        ),
+        TextEngine::Skia
+    );
+    assert_eq!(
+        TextEngine::from_user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
+        ),
+        TextEngine::Gecko
+    );
+    assert_eq!(
+        TextEngine::from_user_agent(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) \
+             AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7.5 Mobile/15E148 Safari/604.1"
+        ),
+        TextEngine::WebKit
+    );
+    assert_eq!(
+        TextEngine::from_user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
+             (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        ),
+        TextEngine::WebKit
+    );
+}
+
+#[test]
+fn vary_matches_measured_micro_envelopes() {
+    use canvasgen::{vary_canvas_data_url, VaryProfile};
+
+    let base = fingerprint_set(&CanvasProfile::new(3));
+    let vp = VaryProfile::from_seed(1234);
+    for c in &base {
+        let url = vary_canvas_data_url(&c.data_url, c.kind, &vp).unwrap();
+        assert_eq!(url, vary_canvas_data_url(&c.data_url, c.kind, &vp).unwrap());
+
+        let bytes = canvasgen::pngout::decode_data_url(&url).unwrap();
+        let (w, h, varied) = decode_png(&bytes);
+        assert_eq!((w, h), (c.width, c.height));
+        let (_, _, original) = decode_png(&c.png);
+        let mut n = 0usize;
+        let mut sum = 0i64;
+        let mut max = 0i32;
+        for (a, b) in original.chunks_exact(4).zip(varied.chunks_exact(4)) {
+            let d = (0..4)
+                .map(|k| (a[k] as i32 - b[k] as i32).abs())
+                .max()
+                .unwrap_or(0);
+            if d > 0 {
+                n += 1;
+                sum += d as i64;
+                max = max.max(d);
+            }
+        }
+        let frac = n as f64 / (w as f64 * h as f64);
+        let mean = sum as f64 / (w as f64 * h as f64);
+        eprintln!("vary {:?}: frac {frac:.4} mean {mean:.3} max {max}", c.kind);
+        match c.kind {
+            ProbeKind::Triangle => {
+                assert_eq!(max, 1, "triangle variation must be 1 LSB");
+                assert!(frac < 0.10, "triangle frac {frac}");
+            }
+            ProbeKind::Text => {
+                assert!(frac < 0.02, "row frac {frac}");
+                assert!(mean < 0.5, "row mean {mean}");
+            }
+            ProbeKind::Small => {
+                assert!(frac < 0.60, "face frac {frac}");
+                assert!(mean < 12.0, "face mean {mean}");
+            }
+            ProbeKind::Abstract | ProbeKind::SmallBlob => {
+                assert!(mean < 3.0, "abstract mean {mean}");
+            }
+        }
+    }
+
+    // A different seed must actually change the hash somewhere.
+    let other = VaryProfile::from_seed(999);
+    assert!(base.iter().any(
+        |c| vary_canvas_data_url(&c.data_url, c.kind, &other).unwrap()
+            != vary_canvas_data_url(&c.data_url, c.kind, &vp).unwrap()
+    ));
 }
 
 #[test]
@@ -490,6 +691,6 @@ fn write_samples() {
     // Default row constant should be the captured sequence.
     assert_eq!(
         DEFAULT_EMOJI_ROW,
-        "\u{2764}\u{FE0F}\u{1F600}\u{1F389}\u{1F446}"
+        "\u{2764}\u{FE0F}\u{1F92A}\u{1F389}\u{1F44B}"
     );
 }

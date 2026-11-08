@@ -828,6 +828,88 @@ pub fn system_emoji_font() -> Result<EmojiFont, String> {
     CACHE.get_or_init(load_system_emoji_font).clone()
 }
 
+/// Generic families used by the abstract probe's `monospace` / `cursive`
+/// text draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextFamily {
+    Monospace,
+    Cursive,
+}
+
+impl TextFamily {
+    fn query_families(self) -> &'static [&'static str] {
+        match self {
+            TextFamily::Monospace => &[
+                "Consolas",
+                "Courier New",
+                "DejaVu Sans Mono",
+                "Liberation Mono",
+            ],
+            TextFamily::Cursive => &["Segoe Script", "Comic Sans MS", "Brush Script MT"],
+        }
+    }
+
+    fn generic(self) -> fontdb::Family<'static> {
+        match self {
+            TextFamily::Monospace => fontdb::Family::Monospace,
+            TextFamily::Cursive => fontdb::Family::Cursive,
+        }
+    }
+}
+
+/// Load a system *text* font (monospace or cursive) for the abstract probe.
+///
+/// Cached per family; falls back to the generic fontdb family when the named
+/// faces are unavailable.
+pub fn system_text_font(family: TextFamily) -> Result<EmojiFont, String> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, Result<EmojiFont, String>>>> =
+        OnceLock::new();
+    static DB: OnceLock<fontdb::Database> = OnceLock::new();
+
+    let key = match family {
+        TextFamily::Monospace => "monospace",
+        TextFamily::Cursive => "cursive",
+    };
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().ok().and_then(|m| m.get(key).cloned()) {
+        return hit;
+    }
+
+    let db = DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        db
+    });
+
+    let load = |families: &[fontdb::Family<'_>]| -> Option<EmojiFont> {
+        let query = fontdb::Query {
+            families,
+            ..fontdb::Query::default()
+        };
+        let id = db.query(&query)?;
+        let (data, index) = db.with_face_data(id, |data, index| (data.to_vec(), index))?;
+        EmojiFont::from_bytes(data, index, key).ok()
+    };
+
+    let names: Vec<fontdb::Family<'_>> = family
+        .query_families()
+        .iter()
+        .map(|name| fontdb::Family::Name(name))
+        .collect();
+    let mut result = load(&names);
+    if result.is_none() {
+        result = load(&[family.generic()]);
+    }
+    let result = result.ok_or_else(|| format!("no system {key} font found"));
+    if let Ok(mut m) = cache.lock() {
+        m.insert(key, result.clone());
+    }
+    result
+}
+
 fn candidate_families() -> Vec<&'static str> {
     #[cfg(target_os = "windows")]
     let first = "Segoe UI Emoji";

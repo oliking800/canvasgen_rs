@@ -96,6 +96,12 @@ enum Command {
     },
     /// Show the detected colour emoji font and crate version.
     Info,
+    /// Apply per-device micro-variation to five data URLs (one per line on
+    /// stdin; writes five lines).
+    Vary {
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -145,6 +151,30 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("canvasgen {VERSION}");
             println!("emoji font: {}", system_font_info());
             println!("probes: {}", canvasgen::FINGERPRINT_PROBES.len());
+            Ok(())
+        }
+        Command::Vary { seed } => {
+            use std::io::Read;
+            let mut input = String::new();
+            std::io::stdin()
+                .read_to_string(&mut input)
+                .map_err(|e| format!("stdin: {e}"))?;
+            let lines: Vec<&str> = input
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .collect();
+            if lines.len() != 5 {
+                return Err(format!(
+                    "vary expects 5 data URLs (one per line), got {}",
+                    lines.len()
+                ));
+            }
+            let vary = canvasgen::VaryProfile::from_seed(seed);
+            for (i, line) in lines.iter().enumerate() {
+                let kind = canvasgen::FINGERPRINT_PROBES[i].0;
+                println!("{}", canvasgen::vary_canvas_data_url(line, kind, &vary)?);
+            }
             Ok(())
         }
         Command::Probes {

@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<body>
+<script>
+const VERTS = [[150,37.5],[14,127.5],[270,127.5]];
+const OPTS = [
+  {antialias:true, preserveDrawingBuffer:true},
+  {antialias:false, preserveDrawingBuffer:true},
+  {antialias:true, alpha:false, preserveDrawingBuffer:true},
+  {antialias:true, depth:false, stencil:false, preserveDrawingBuffer:true},
+  {antialias:true, premultipliedAlpha:false, preserveDrawingBuffer:true},
+  {antialias:true, preserveDrawingBuffer:true, powerPreference:'high-performance'},
+];
+const out = [];
+for (const opt of OPTS) {
+  const w = 300, h = 150;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const gl = cv.getContext('webgl', opt);
+  const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
+  const fs = 'precision highp float;uniform vec2 u;void main(){gl_FragColor=vec4(2.0*gl_FragCoord.x/u.x,2.0*gl_FragCoord.y/u.y,1.0,1.0);}';
+  const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o;};
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
+  const verts = new Float32Array(VERTS.flatMap(([x,y])=>[2*x/w-1,1-2*y/h]));
+  const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,verts,gl.STATIC_DRAW);
+  const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  gl.uniform2f(gl.getUniformLocation(pr,'u'),w,h);gl.viewport(0,0,w,h);
+  gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.drawArrays(gl.TRIANGLES,0,3);
+  out.push(cv.toDataURL());
+}
+document.body.setAttribute('data-out', JSON.stringify(out));
+</script>

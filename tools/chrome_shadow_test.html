@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<canvas id="c" width="300" height="150"></canvas>
+<script>
+const c = document.getElementById('c');
+const x = c.getContext('2d');
+const stack = "'Segoe Fluent Icons','Ink Free','Bahnschrift','Segoe MDL2 Assets','HoloLens MDL2 Assets','Leelawadee UI','Javanese Text','Segoe UI Emoji','Aldhabi','Gadugi','Myanmar Text','Nirmala UI','Lucida Console','Cambria Math','Chakra Petch','Kodchasan','Galvji','MuktaMahee Regular','InaiMathi Bold','American Typewriter Semibold','Futura Bold','SignPainter-HouseScript Semibold','PingFang HK Light','Kohinoor Devanagari Medium','Luminari','Geneva','Helvetica Neue','Droid Sans Mono','Roboto','Ubuntu','Noto Color Emoji',sans-serif";
+x.font = "6.68896321070234px " + stack;
+x.fillStyle = "#000";
+x.textBaseline = "alphabetic";
+// variant A: no shadow
+x.fillText("\u2764\uFE0F\u{1F92A}\u{1F389}\u{1F44B}", 50, 70);
+// variant B: with shadow, lower on canvas
+x.save();
+x.shadowBlur = 24.566748063684784;
+x.shadowColor = "#FFB399";
+x.fillText("\u2764\uFE0F\u{1F92A}\u{1F389}\u{1F44B}", 150, 70);
+x.restore();
+document.title = JSON.stringify({
+  a: Array.from(x.getImageData(40, 40, 100, 60).data).filter((v,i)=>i%4===3 && v>0).length,
+  b: Array.from(x.getImageData(140, 40, 100, 60).data).filter((v,i)=>i%4===3 && v>0).length
+});
+</script>

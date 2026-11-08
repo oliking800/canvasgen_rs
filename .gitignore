@@ -1,1 +1,5 @@
 /target
+
+captures_devices/
+canvas_calls.json
+canvas_norm_*.json
