@@ -8,6 +8,10 @@ fonts. No browser, no JavaScript, no bundled fonts.
 keeps the same sizes/order, and can render an emoji row that is visually almost
 indistinguishable from the captured Chrome probe.
 
+> **Status: not published.** The package is verified with `cargo package` and
+> `cargo publish --dry-run`; no upload is performed. See
+> [Packaging status](#packaging-status-not-published).
+
 ```rust
 use canvasgen::{fingerprint_set, CanvasProfile};
 
