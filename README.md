@@ -149,10 +149,15 @@ the capture machine; the Skia text style, `python`-free check in
 |---|---|---|
 | 0 face 20x20 | mean 3.11, max 177 | mean 2.12, max 38 |
 | 3 emoji row 300x150 | mean 0.12, max 135 | mean 0.03, max 54 |
+| 1 WebGL triangle 300x150 | 5.5 % of pixels, max 32 | 0.4 % of pixels, max 1 |
 
 The text probes are rendered at 8x (face) / 4x (row) and box-filtered back with
 coverage-weighted colour, which approximates Skia's exact-area antialiasing much
-better than a single 1x pass.  Probes 2 and 4 are seed-driven compositions, so
+better than a single 1x pass.  The triangle now resolves with 4x MSAA at the standard sample positions (edge
+coverage 0, 1/4, 1/2, 3/4, 1, exactly the captured blue levels), rounds halves down
+in both the colour and the coverage step, and takes its rasterizer bias from the
+claimed GPU: `SiliconProfile::for_renderer("ANGLE (NVIDIA, ... RTX 4060 ...)")`
+(`GpuClass::NvidiaAda`).  Probes 2 and 4 are seed-driven compositions, so
 they are not comparable pixel-for-pixel.
 
 Per-device GPU micro-variation: `SiliconProfile::from_seed` adds a sub-LSB

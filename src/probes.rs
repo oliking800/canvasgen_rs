@@ -45,11 +45,6 @@ fn mix_seed(seed: u64, index: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-fn clamp_u8(v: f32) -> u8 {
-    v.clamp(0.0, 255.0).round() as u8
-}
-
-/// Apply an alpha-only gamma to straight-alpha RGBA (text edge intensity).
 /// Supersampling factor for the small face probe (20x20 logical pixels).
 pub const FACE_SUPERSAMPLE: u32 = 8;
 /// Supersampling factor for the 300x150 text row.
@@ -110,6 +105,7 @@ fn render_supersampled(
     out
 }
 
+/// Apply an alpha-only gamma to straight-alpha RGBA (text edge intensity).
 fn apply_alpha_gamma(rgba: &mut [u8], gamma: f32) {
     if (gamma - 1.0).abs() < 1e-4 {
         return;
@@ -162,26 +158,6 @@ pub(crate) fn perturb_text_edges(rgba: &mut [u8], w: u32, h: u32, amplitude: f32
             px[3] = (px[3] as f32 + d * 0.5).clamp(0.0, 255.0).round() as u8;
         }
     }
-}
-
-/// Straight-alpha source-over.
-fn blend_rgba(dst: [u8; 4], src: [u8; 4], coverage: f32) -> [u8; 4] {
-    let a = (src[3] as f32 / 255.0) * coverage.clamp(0.0, 1.0);
-    if a <= 0.0 {
-        return dst;
-    }
-    let da = dst[3] as f32 / 255.0;
-    let oa = a + da * (1.0 - a);
-    if oa <= 0.0 {
-        return [0, 0, 0, 0];
-    }
-    let mix = |s: u8, d: u8| ((s as f32 * a + d as f32 * da * (1.0 - a)) / oa).clamp(0.0, 255.0);
-    [
-        clamp_u8(mix(src[0], dst[0])),
-        clamp_u8(mix(src[1], dst[1])),
-        clamp_u8(mix(src[2], dst[2])),
-        clamp_u8(oa * 255.0),
-    ]
 }
 
 /// Three-pass box blur of the alpha channel, returned as a separate mask.
@@ -282,6 +258,44 @@ pub fn fingerprint_set_with(profile: &CanvasProfile, style: TextStyle) -> Vec<Ge
                 _ => render_probe(kind, &p),
             }
         })
+        .collect()
+}
+
+/// Five probes with an explicit text style and GPU rasterizer bias, so the
+/// WebGL triangle agrees with the GPU the fingerprint claims (see
+/// [`SiliconProfile::for_renderer`]).
+pub fn fingerprint_set_with_silicon(
+    profile: &CanvasProfile,
+    style: TextStyle,
+    silicon: SiliconProfile,
+) -> Vec<GeneratedCanvas> {
+    FINGERPRINT_PROBES
+        .iter()
+        .enumerate()
+        .map(|(i, &(kind, w, h))| {
+            let mut p = profile.clone();
+            p.width = w;
+            p.height = h;
+            p.seed = mix_seed(profile.seed, i as u64);
+            match kind {
+                ProbeKind::Text => emoji_text_with(&p, style),
+                ProbeKind::Small => small_probe_with_style(&p, SmallKind::Emoji, style),
+                ProbeKind::Triangle => gradient_triangle_with(&p, silicon),
+                _ => render_probe(kind, &p),
+            }
+        })
+        .collect()
+}
+
+/// Data URLs with an explicit text style and GPU bias.
+pub fn canvas_data_urls_with_silicon(
+    profile: &CanvasProfile,
+    style: TextStyle,
+    silicon: SiliconProfile,
+) -> Vec<String> {
+    fingerprint_set_with_silicon(profile, style, silicon)
+        .into_iter()
+        .map(|c| c.data_url)
         .collect()
 }
 
@@ -449,19 +463,25 @@ pub fn gradient_triangle_with(profile: &CanvasProfile, silicon: SiliconProfile) 
         }
     };
 
+    // Real GPUs resolve the triangle with 4x MSAA at the standard D3D11/Vulkan
+    // sample positions, so edge coverage is quantised to 0, 1/4, 1/2, 3/4, 1
+    // (the captured triangle has exactly the blue values 64, 127 and 191 on its
+    // edge).  A 4x4 supersampling grid would give 16 levels, which no GPU does.
+    const MSAA4: [(f32, f32); 4] = [
+        (0.5 - 2.0 / 16.0, 0.5 - 6.0 / 16.0),
+        (0.5 + 6.0 / 16.0, 0.5 - 2.0 / 16.0),
+        (0.5 - 6.0 / 16.0, 0.5 + 2.0 / 16.0),
+        (0.5 + 2.0 / 16.0, 0.5 + 6.0 / 16.0),
+    ];
     let aa = profile.antialias;
-    let samples = if aa { 4 } else { 1 };
     for y in 0..h {
         for x in 0..w {
             let mut hits = 0u32;
+            let nsamples = if aa { MSAA4.len() as u32 } else { 1 };
             if aa {
-                for sy in 0..samples {
-                    for sx in 0..samples {
-                        let px = x as f32 + (sx as f32 + 0.5) / samples as f32;
-                        let py = y as f32 + (sy as f32 + 0.5) / samples as f32;
-                        if inside((px, py)) {
-                            hits += 1;
-                        }
+                for &(ox, oy) in MSAA4.iter() {
+                    if inside((x as f32 + ox, y as f32 + oy)) {
+                        hits += 1;
                     }
                 }
             } else if inside((x as f32 + 0.5, y as f32 + 0.5)) {
@@ -470,7 +490,7 @@ pub fn gradient_triangle_with(profile: &CanvasProfile, silicon: SiliconProfile) 
             if hits == 0 {
                 continue;
             }
-            let coverage = hits as f32 / (samples * samples) as f32;
+            let coverage = hits as f32 / nsamples as f32;
 
             let cx = x as f32 + 0.5;
             let cy = y as f32 + 0.5;
@@ -478,12 +498,18 @@ pub fn gradient_triangle_with(profile: &CanvasProfile, silicon: SiliconProfile) 
             let g =
                 (2.0 * (h as f32 - cy) / h as f32).clamp(0.0, 1.0) * 255.0 + silicon.rgb_bias[1];
             let b = 255.0 + silicon.rgb_bias[2];
-            let src = [clamp_u8(r), clamp_u8(g), clamp_u8(b), 255];
+            // The GPU first quantises the interpolated colour to 8 bits, then
+            // scales it by MSAA coverage; both steps round halves down (measured:
+            // 505 of 508 captured edge pixels reproduce exactly, 0 for blue).
+            let half_down = |v: f32| (v - 0.5).ceil().clamp(0.0, 255.0);
+            let src = [half_down(r), half_down(g), half_down(b)];
 
             let i = (y as usize * w as usize + x as usize) * 4;
-            let dst = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
-            let out = blend_rgba(dst, src, coverage);
-            rgba[i..i + 4].copy_from_slice(&out);
+            for c in 0..3 {
+                let dst = rgba[i + c] as f32;
+                rgba[i + c] = half_down(src[c] * coverage + dst * (1.0 - coverage)) as u8;
+            }
+            rgba[i + 3] = 255;
         }
     }
 

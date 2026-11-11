@@ -642,7 +642,7 @@ fn write_samples() {
 
         // Side-by-side with the captured row (if the research checkout exists).
         let captured = std::path::Path::new(
-            r"C:\Users\oli\Desktop\hcaptcha_research\captures_canvas\canvas_3_300x150.png",
+            r"C:\Users\oli\Desktop\captcha-workspace\research\hcaptcha_research\captures_canvas\canvas_3_300x150.png",
         );
         if captured.exists() {
             if let Ok(bytes) = std::fs::read(captured) {
@@ -693,4 +693,34 @@ fn write_samples() {
         DEFAULT_EMOJI_ROW,
         "\u{2764}\u{FE0F}\u{1F92A}\u{1F389}\u{1F44B}"
     );
+}
+
+#[test]
+fn triangle_uses_msaa4_levels_and_gpu_from_renderer() {
+    use canvasgen::{gradient_triangle_with, GpuClass, SiliconProfile};
+
+    assert_eq!(
+        GpuClass::from_renderer(
+            "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 (0x00002882) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+        ),
+        GpuClass::NvidiaAda
+    );
+    assert_eq!(
+        GpuClass::from_renderer("ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11)"),
+        GpuClass::Nvidia
+    );
+    assert_eq!(GpuClass::from_renderer("ANGLE (AMD, AMD Radeon RX 6700 XT)"), GpuClass::Amd);
+    assert_eq!(GpuClass::from_renderer("Apple M2"), GpuClass::Apple);
+    assert_eq!(GpuClass::from_renderer("ANGLE (Intel, Intel(R) UHD Graphics 630)"), GpuClass::Intel);
+
+    // 4x MSAA: edge coverage on the black field is 0, 1/4, 1/2, 3/4 or 1, so the
+    // blue channel (255 inside) only takes the captured levels.
+    let p = CanvasProfile::new(3).with_size(300, 150);
+    let tri = gradient_triangle_with(&p, SiliconProfile::for_gpu(GpuClass::NvidiaAda));
+    let (_, _, px) = decode_png(&tri.png);
+    let mut levels = std::collections::BTreeSet::new();
+    for q in px.chunks_exact(4) {
+        levels.insert(q[2]);
+    }
+    assert_eq!(levels.into_iter().collect::<Vec<_>>(), vec![0, 64, 127, 191, 255]);
 }

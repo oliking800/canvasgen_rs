@@ -36,8 +36,8 @@ pub use emoji::{
     TextFamily,
 };
 pub use probes::{
-    abstract_image, canvas_data_urls, canvas_data_urls_with, emoji_row, emoji_text,
-    emoji_text_fallback, emoji_text_with, fingerprint_set, fingerprint_set_with, gradient_triangle,
+    abstract_image, canvas_data_urls, canvas_data_urls_with, canvas_data_urls_with_silicon, emoji_row, emoji_text,
+    emoji_text_fallback, emoji_text_with, fingerprint_set, fingerprint_set_with, fingerprint_set_with_silicon, gradient_triangle,
     gradient_triangle_with, render_probe, small_probe, small_probe_with, small_probe_with_style,
     SmallKind, ABSTRACT_BG, ABSTRACT_FILLS, CANVAS_CTXS_JSON, DEFAULT_EMOJI_ROW,
     FINGERPRINT_PROBES, TEXT_ROW_BASELINE, TEXT_ROW_FONT_SIZE, TEXT_ROW_X,

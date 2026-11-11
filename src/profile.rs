@@ -66,6 +66,9 @@ impl Default for SiliconProfile {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuClass {
     Nvidia,
+    /// NVIDIA Ada/Blackwell (RTX 40/50) under ANGLE/D3D11: measured on an RTX 4060,
+    /// where the green ramp rounds about -0.1 LSB lower than the older reference.
+    NvidiaAda,
     Amd,
     Intel,
     Apple,
@@ -83,6 +86,7 @@ impl GpuClass {
     pub const fn bias(self) -> [f32; 3] {
         match self {
             GpuClass::Nvidia => [0.0, 0.0, 0.0],
+            GpuClass::NvidiaAda => [0.0, -0.10, 0.0],
             GpuClass::Amd => [0.0, -0.10, 0.0],
             GpuClass::Intel => [0.0, 0.05, 0.0],
             GpuClass::Apple => [0.0, -0.20, 0.0],
@@ -93,12 +97,49 @@ impl GpuClass {
     }
 }
 
+impl GpuClass {
+    /// GPU family from a WebGL `UNMASKED_RENDERER_WEBGL` string (for example
+    /// `ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 (0x00002882) Direct3D11 ...)`),
+    /// so the triangle probe agrees with the GPU the fingerprint claims.
+    pub fn from_renderer(renderer: &str) -> GpuClass {
+        let r = renderer.to_ascii_lowercase();
+        if r.contains("nvidia") || r.contains("geforce") || r.contains("quadro") {
+            // RTX 40xx / 50xx: the model number is the four digits after "rtx".
+            let ada = r.find("rtx").is_some_and(|i| {
+                let digits: String = r[i + 3..]
+                    .chars()
+                    .skip_while(|c| !c.is_ascii_digit())
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                digits.len() >= 4 && matches!(digits.as_bytes()[0], b'4' | b'5')
+            });
+            if ada { GpuClass::NvidiaAda } else { GpuClass::Nvidia }
+        } else if r.contains("radeon") || r.contains("amd") {
+            GpuClass::Amd
+        } else if r.contains("apple") {
+            GpuClass::Apple
+        } else if r.contains("adreno") {
+            GpuClass::Adreno
+        } else if r.contains("mali") {
+            GpuClass::Mali
+        } else if r.contains("intel") {
+            GpuClass::Intel
+        } else {
+            GpuClass::Unknown
+        }
+    }
+}
+
 impl SiliconProfile {
     /// Bias-free rasterizer (the exact captured device).
     pub const fn neutral() -> Self {
         Self {
             rgb_bias: [0.0, 0.0, 0.0],
         }
+    }
+    /// Bias for the GPU named by a WebGL renderer string.
+    pub fn for_renderer(renderer: &str) -> Self {
+        Self::for_gpu(GpuClass::from_renderer(renderer))
     }
     /// Bias for a known GPU family.
     pub const fn for_gpu(gpu: GpuClass) -> Self {
