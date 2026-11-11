@@ -141,6 +141,20 @@ Visual validation against the captures:
   `samples/compare_captures.png` stacks capture (top) and generated (bottom)
   for all five.
 
+Fidelity against a real browser (Chrome 148, Windows, RTX 4060, measured on
+the capture machine; the Skia text style, `python`-free check in
+`examples/fit_face.rs` / `examples/fit_ss.rs`):
+
+| probe | before | now |
+|---|---|---|
+| 0 face 20x20 | mean 3.11, max 177 | mean 2.12, max 38 |
+| 3 emoji row 300x150 | mean 0.12, max 135 | mean 0.03, max 54 |
+
+The text probes are rendered at 8x (face) / 4x (row) and box-filtered back with
+coverage-weighted colour, which approximates Skia's exact-area antialiasing much
+better than a single 1x pass.  Probes 2 and 4 are seed-driven compositions, so
+they are not comparable pixel-for-pixel.
+
 Per-device GPU micro-variation: `SiliconProfile::from_seed` adds a sub-LSB
 rounding bias to the WebGL triangle (before quantization). On the measured
 Apple-vs-NVIDIA pair this produces 1-LSB contour flips on 3.9% of pixels; the

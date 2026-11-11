@@ -50,6 +50,66 @@ fn clamp_u8(v: f32) -> u8 {
 }
 
 /// Apply an alpha-only gamma to straight-alpha RGBA (text edge intensity).
+/// Supersampling factor for the small face probe (20x20 logical pixels).
+pub const FACE_SUPERSAMPLE: u32 = 8;
+/// Supersampling factor for the 300x150 text row.
+pub const TEXT_SUPERSAMPLE: u32 = 4;
+/// Fraction of the engine's origin offset applied to the 20x20 face (calibrated
+/// against the measured Chrome<->Firefox face delta; see tests/render.rs).
+pub const FACE_DX_SCALE: f32 = 0.15;
+
+/// Render a text run at `k`x resolution and box-filter it back down, weighting
+/// colour by coverage (premultiplied averaging).  Skia's analytic antialiasing
+/// computes near-exact pixel coverage; a single zeno pass at 1x drifts from it on
+/// every layer edge, and supersampling lands measurably closer (against a real
+/// Chrome 148 / Windows capture the 20x20 face error drops by about a third).
+/// Output is straight-alpha RGBA at `w` x `h`.
+fn render_supersampled(
+    w: u32,
+    h: u32,
+    k: u32,
+    draw: impl FnOnce(&mut Canvas, &EmojiProfile) -> bool,
+    ep: &EmojiProfile,
+) -> Vec<u8> {
+    let k = k.max(1);
+    let hi_profile = EmojiProfile {
+        font_size: ep.font_size,
+        dpr: ep.dpr * k as f32,
+        baseline: ep.baseline,
+        letter_spacing: ep.letter_spacing,
+        antialias: ep.antialias,
+    };
+    let mut hi = Canvas::new(w * k, h * k);
+    draw(&mut hi, &hi_profile);
+    let src = hi.to_rgba();
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    let n = (k * k) as f32;
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0f32; 3];
+            let mut asum = 0f32;
+            for yy in 0..k {
+                for xx in 0..k {
+                    let i = (((y * k + yy) * w * k + x * k + xx) * 4) as usize;
+                    let a = src[i + 3] as f32 / 255.0;
+                    acc[0] += src[i] as f32 * a;
+                    acc[1] += src[i + 1] as f32 * a;
+                    acc[2] += src[i + 2] as f32 * a;
+                    asum += a;
+                }
+            }
+            let o = ((y * w + x) * 4) as usize;
+            if asum > 0.0 {
+                for c in 0..3 {
+                    out[o + c] = (acc[c] / asum).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+            out[o + 3] = (asum / n * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
 fn apply_alpha_gamma(rgba: &mut [u8], gamma: f32) {
     if (gamma - 1.0).abs() < 1e-4 {
         return;
@@ -269,7 +329,6 @@ pub fn emoji_text_with(profile: &CanvasProfile, style: TextStyle) -> GeneratedCa
     let (w, h) = profile.pixel_size();
     let background = profile.background.unwrap_or([0, 0, 0, 0]);
     let mut canvas = Canvas::filled(w, h, background);
-    let mut text = Canvas::new(w, h);
     let ep = EmojiProfile {
         font_size: TEXT_ROW_FONT_SIZE,
         dpr: profile.dpr,
@@ -278,26 +337,25 @@ pub fn emoji_text_with(profile: &CanvasProfile, style: TextStyle) -> GeneratedCa
         antialias: profile.antialias,
     };
     let x = TEXT_ROW_X + style.dx;
-    match profile.emoji_font() {
-        Ok(font) => {
-            if emoji::render_row(
-                &mut text,
-                &font,
-                DEFAULT_EMOJI_ROW,
-                &ep,
-                x,
-                [32, 32, 32, 255],
-            )
-            .is_err()
-            {
-                emoji::render_fallback_row(&mut text, DEFAULT_EMOJI_ROW, &ep, x, [32, 32, 32, 255]);
+    let font = profile.emoji_font();
+    let mut rgba = render_supersampled(
+        w,
+        h,
+        TEXT_SUPERSAMPLE,
+        |cv, hp| match &font {
+            Ok(f) => {
+                if emoji::render_row(cv, f, DEFAULT_EMOJI_ROW, hp, x, [32, 32, 32, 255]).is_err() {
+                    emoji::render_fallback_row(cv, DEFAULT_EMOJI_ROW, hp, x, [32, 32, 32, 255]);
+                }
+                true
             }
-        }
-        Err(_) => {
-            emoji::render_fallback_row(&mut text, DEFAULT_EMOJI_ROW, &ep, x, [32, 32, 32, 255]);
-        }
-    }
-    let mut rgba = text.to_rgba();
+            Err(_) => {
+                emoji::render_fallback_row(cv, DEFAULT_EMOJI_ROW, hp, x, [32, 32, 32, 255]);
+                true
+            }
+        },
+        &ep,
+    );
     apply_alpha_gamma(&mut rgba, style.gamma);
     perturb_text_edges(&mut rgba, w, h, style.raster_delta, style.salt);
     canvas.blend_image(0, 0, w, h, &rgba);
@@ -463,7 +521,6 @@ pub fn small_probe_with_style(
         SmallKind::Emoji => {
             let (w, h) = profile.pixel_size();
             let mut canvas = Canvas::new(w, h);
-            let mut text = Canvas::new(w, h);
             let text_str = "\u{1F600}";
             let mut ep = EmojiProfile {
                 font_size: 15.0,
@@ -474,18 +531,24 @@ pub fn small_probe_with_style(
             };
             ep.antialias &= profile.antialias;
 
-            let drawn = profile
-                .emoji_font()
-                .ok()
-                .and_then(|font| {
-                    emoji::render_row(&mut text, &font, text_str, &ep, style.dx, [0, 0, 0, 255])
+            let font = profile.emoji_font();
+            let mut rgba = render_supersampled(
+                w,
+                h,
+                FACE_SUPERSAMPLE,
+                |cv, hp| {
+                    let ok = font
+                        .as_ref()
                         .ok()
-                })
-                .is_some();
-            if !drawn {
-                emoji::render_fallback_row(&mut text, text_str, &ep, style.dx, [0, 0, 0, 255]);
-            }
-            let mut rgba = text.to_rgba();
+                        .and_then(|f| emoji::render_row(cv, f, text_str, hp, style.dx * FACE_DX_SCALE, [0, 0, 0, 255]).ok())
+                        .is_some();
+                    if !ok {
+                        emoji::render_fallback_row(cv, text_str, hp, style.dx * FACE_DX_SCALE, [0, 0, 0, 255]);
+                    }
+                    true
+                },
+                &ep,
+            );
             apply_alpha_gamma(&mut rgba, style.gamma);
             perturb_text_edges(&mut rgba, w, h, style.raster_delta, style.salt);
             canvas.blend_image(0, 0, w, h, &rgba);
